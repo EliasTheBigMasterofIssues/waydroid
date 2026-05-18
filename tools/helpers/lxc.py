@@ -227,7 +227,7 @@ def make_base_props(args):
         for p in hardware_props:
             prop = tools.helpers.props.host_get(args, p)
             if prop != "":
-                for lib in ["/odm/lib", "/odm/lib64", "/vendor/lib", "/vendor/lib64", "/system/lib", "/system/lib64"]:
+                for lib in ["//odmlib", "/odm/lib64", "/vendor/lib", "/vendor/lib64", "/system/lib", "/system/lib64"]:
                     hal_file = lib + "/hw/" + hardware + "." + prop + ".so"
                     if os.path.isfile(hal_file):
                         return prop
@@ -242,6 +242,26 @@ def make_base_props(args):
             return intf in sm.list_sync()
         except Exception:
             return False
+
+    def get_sys_props():
+        sys_props = [
+            "dalvik.vm.background-dex2oat-cpu-set",
+            "dalvik.vm.background-dex2oat-threads",
+            "dalvik.vm.boot-dex2oat-cpu-set",
+            "dalvik.vm.boot-dex2oat-threads",
+            "dalvik.vm.dex2oat-cpu-set",
+            "dalvik.vm.dex2oat-threads"]
+        cpus_count = os.cpu_count()
+        cpus_count = 8
+        list_cpu = []
+        for cpus in range(cpus_count):
+            list_cpu.append(str(cpus))
+        
+        cpus_range = ','.join(list_cpu)
+        props.append("dalvik.vm.background-dex2oat-cpu-set="+f"{cpus_range}")
+        props.append("dalvik.vm.background-dex2oat-threads="+f"{cpus_count)")
+        props.append("dalvik.vm.boot-dex2oat-cpu-set="+f"{cpus_range}")
+        
 
     props = []
 
