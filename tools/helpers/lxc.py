@@ -1,20 +1,23 @@
 # Copyright 2021 Erfan Abdi
 # SPDX-License-Identifier: GPL-3.0-or-later
-import subprocess
-import os
-import logging
 import glob
+import logging
+import os
+import platform
 import shutil
 import signal
 import stat
+import subprocess
 import sys
 import time
-import platform
-import gbinder
-import tools.config
-import tools.helpers.run
 from contextlib import suppress
 from pathlib import Path
+
+import gbinder
+
+import tools.config
+import tools.helpers.run
+
 
 def get_lxc_version(args):
     if shutil.which("lxc-info") is not None:
@@ -23,6 +26,7 @@ def get_lxc_version(args):
         return int(version_str[0])
     else:
         return 0
+
 
 def add_node_entry(nodes, src, dist, mnt_type, options, check):
     if check and not os.path.exists(src):
@@ -37,8 +41,10 @@ def add_node_entry(nodes, src, dist, mnt_type, options, check):
     nodes.append(entry)
     return True
 
+
 def generate_nodes_lxc_config(args):
     nodes = []
+
     def make_entry(src, dist=None, mnt_type="none", options="bind,create=file,optional 0 0", check=True):
         return add_node_entry(nodes, src, dist, mnt_type, options, check)
 
@@ -92,18 +98,15 @@ def generate_nodes_lxc_config(args):
     make_entry("/sys/module/lowmemorykiller", options="bind,create=dir,optional 0 0")
 
     # Mount host permissions
-    make_entry(tools.config.defaults["host_perms"],
-               "vendor/etc/host-permissions", options="bind,optional 0 0")
+    make_entry(tools.config.defaults["host_perms"], "vendor/etc/host-permissions", options="bind,optional 0 0")
 
     # Necessary sw_sync node for HWC
     make_entry("/dev/sw_sync")
     make_entry("/sys/kernel/debug", options="rbind,create=dir,optional 0 0")
 
     # Vibrator
-    make_entry("/sys/class/leds/vibrator",
-               options="bind,create=dir,optional 0 0")
-    make_entry("/sys/devices/virtual/timed_output/vibrator",
-               options="bind,create=dir,optional 0 0")
+    make_entry("/sys/class/leds/vibrator", options="bind,create=dir,optional 0 0")
+    make_entry("/sys/devices/virtual/timed_output/vibrator", options="bind,create=dir,optional 0 0")
 
     # Media dev nodes (for Mediatek)
     make_entry("/dev/Vcodec")
@@ -113,8 +116,7 @@ def generate_nodes_lxc_config(args):
 
     # WSLg
     make_entry("tmpfs", "mnt_extra", "tmpfs", "nodev 0 0", False)
-    make_entry("/mnt/wslg", "mnt_extra/wslg",
-               options="rbind,create=dir,optional 0 0")
+    make_entry("/mnt/wslg", "mnt_extra/wslg", options="rbind,create=dir,optional 0 0")
 
     # Make a tmpfs at every possible rootfs mountpoint
     make_entry("tmpfs", "tmp", "tmpfs", "nodev 0 0", False)
@@ -126,19 +128,23 @@ def generate_nodes_lxc_config(args):
 
     return nodes
 
+
 LXC_APPARMOR_PROFILE = "lxc-waydroid"
+
+
 def get_apparmor_status(args):
     enabled = False
     if shutil.which("aa-enabled"):
-        enabled = (tools.helpers.run.user(args, ["aa-enabled", "--quiet"], check=False) == 0)
+        enabled = tools.helpers.run.user(args, ["aa-enabled", "--quiet"], check=False) == 0
     if not enabled and shutil.which("systemctl"):
-        enabled = (tools.helpers.run.user(args, ["systemctl", "is-active", "-q", "apparmor"], check=False) == 0)
+        enabled = tools.helpers.run.user(args, ["systemctl", "is-active", "-q", "apparmor"], check=False) == 0
     try:
         with open("/sys/kernel/security/apparmor/profiles", "r") as f:
-            enabled &= (LXC_APPARMOR_PROFILE in f.read())
+            enabled &= LXC_APPARMOR_PROFILE in f.read()
     except Exception:
         enabled = False
     return enabled
+
 
 def set_lxc_config(args):
     lxc_path = tools.config.defaults["lxc"] + "/waydroid"
@@ -148,7 +154,7 @@ def set_lxc_config(args):
     config_paths = tools.config.tools_src + "/data/configs/config_"
     seccomp_profile = tools.config.tools_src + "/data/configs/waydroid.seccomp"
 
-    config_snippets = [ config_paths + "base" ]
+    config_snippets = [config_paths + "base"]
     # lxc v1 and v2 are bit special because some options got renamed later
     if lxc_ver <= 2:
         config_snippets.append(config_paths + "1")
@@ -160,14 +166,20 @@ def set_lxc_config(args):
 
     command = ["mkdir", "-p", lxc_path]
     tools.helpers.run.user(args, command)
-    command = ["sh", "-c", "cat {} > \"{}\"".format(' '.join('"{0}"'.format(w) for w in config_snippets), lxc_path + "/config")]
+    command = ["sh", "-c", 'cat {} > "{}"'.format(" ".join('"{0}"'.format(w) for w in config_snippets), lxc_path + "/config")]
     tools.helpers.run.user(args, command)
     command = ["sed", "-i", "s/LXCARCH/{}/".format(platform.machine()), lxc_path + "/config"]
     tools.helpers.run.user(args, command)
     command = ["cp", "-fpr", seccomp_profile, lxc_path + "/waydroid.seccomp"]
     tools.helpers.run.user(args, command)
     if get_apparmor_status(args):
-        command = ["sed", "-i", "-E", "/lxc.aa_profile|lxc.apparmor.profile/ s/unconfined/{}/g".format(LXC_APPARMOR_PROFILE), lxc_path + "/config"]
+        command = [
+            "sed",
+            "-i",
+            "-E",
+            "/lxc.aa_profile|lxc.apparmor.profile/ s/unconfined/{}/g".format(LXC_APPARMOR_PROFILE),
+            lxc_path + "/config",
+        ]
         tools.helpers.run.user(args, command)
 
     nodes = generate_nodes_lxc_config(args)
@@ -180,14 +192,15 @@ def set_lxc_config(args):
     # Create empty file
     Path(os.path.join(lxc_path, "config_session")).touch()
 
+
 def generate_session_lxc_config(args, session):
     nodes = []
+
     def make_entry(src, dist=None, mnt_type="none", options="rbind,create=file 0 0"):
         if any(x in src for x in ["\n", "\r"]):
             logging.warning("User-provided mount path contains illegal character: " + src)
             return False
-        if dist is None and (not os.path.exists(src) or
-                             str(os.stat(src).st_uid) != session["user_id"]):
+        if dist is None and (not os.path.exists(src) or str(os.stat(src).st_uid) != session["user_id"]):
             logging.warning("User-provided mount path is not owned by user: " + src)
             return False
         return add_node_entry(nodes, src, dist, mnt_type, options, check=False)
@@ -197,7 +210,9 @@ def generate_session_lxc_config(args, session):
         raise OSError("Failed to create XDG_RUNTIME_DIR mount point")
 
     wayland_host_socket = os.path.realpath(os.path.join(session["xdg_runtime_dir"], session["wayland_display"]))
-    wayland_container_socket = os.path.realpath(os.path.join(tools.config.defaults["container_xdg_runtime_dir"], tools.config.defaults["container_wayland_display"]))
+    wayland_container_socket = os.path.realpath(
+        os.path.join(tools.config.defaults["container_xdg_runtime_dir"], tools.config.defaults["container_wayland_display"])
+    )
     if not make_entry(wayland_host_socket, wayland_container_socket[1:]):
         raise OSError("Failed to bind Wayland socket")
 
@@ -216,14 +231,10 @@ def generate_session_lxc_config(args, session):
     command = ["mv", config_nodes_tmp_path, lxc_path]
     tools.helpers.run.user(args, command)
 
+
 def make_base_props(args):
     def find_hal(hardware):
-        hardware_props = [
-            "ro.hardware." + hardware,
-            "ro.hardware",
-            "ro.product.board",
-            "ro.arch",
-            "ro.board.platform"]
+        hardware_props = ["ro.hardware." + hardware, "ro.hardware", "ro.product.board", "ro.arch", "ro.board.platform"]
         for p in hardware_props:
             prop = tools.helpers.props.host_get(args, p)
             if prop != "":
@@ -321,17 +332,15 @@ def make_base_props(args):
         props.append("ro.vndk.lite=true")
 
     for product in ["brand", "device", "manufacturer", "model", "name"]:
-        prop_product = tools.helpers.props.host_get(
-            args, "ro.product.vendor." + product)
+        prop_product = tools.helpers.props.host_get(args, "ro.product.vendor." + product)
         if prop_product != "":
             props.append("ro.product.waydroid." + product + "=" + prop_product)
         else:
             if os.path.isfile("/proc/device-tree/" + product):
                 with open("/proc/device-tree/" + product) as f:
-                    f_value = f.read().strip().rstrip('\x00')
+                    f_value = f.read().strip().rstrip("\x00")
                     if f_value != "":
-                        props.append("ro.product.waydroid." +
-                                     product + "=" + f_value)
+                        props.append("ro.product.waydroid." + product + "=" + f_value)
 
     prop_fp = tools.helpers.props.host_get(args, "ro.vendor.build.fingerprint")
     if prop_fp != "":
@@ -352,11 +361,14 @@ def make_base_props(args):
         props.extend(dalvik_dex2oat)
     except Exception as e:
         logging.info(f"Error: Can't be possible to generate Dalvik's DEX2OAT properties: {e}")
-    
+
     # Generate necessary dalvik_vm props based on total physical ram
     try:
-        mem_bytes = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
-        mem_gib = round(mem_bytes / (1024.**3))
+        host_arch = True if "64bit" in platform.architecture() else False
+        if host_arch:
+            props.append("dalvik.vm.dex2oat64.enabled=true")
+        mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        mem_gib = round(mem_bytes / (1024.0**3))
         dalvik_vm = []
         if mem_gib >= 16:
             dalvik_vm = [
@@ -416,29 +428,30 @@ def make_base_props(args):
             logging.info("Your physical RAM is lower than 2GB: Dalvik's VM properties can't be generated")
         props.extend(dalvik_vm)
     except Exception as e:
-        logging.info(f"Error: Can't be possible to generate Dalvik's VM properties: {e}")    
+        logging.info(f"Error: Can't be possible to generate Dalvik's VM properties: {e}")
 
     # Detect if System has Low Memory RAM
     try:
-        mem_bytes = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
-        mem_gib = round(mem_bytes / (1024.**3))
+        mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        mem_gib = round(mem_bytes / (1024.0**3))
         if mem_gib <= 5:
             logging.info("Low Memory Ram detected: Adding Low Memory RAM property")
             props.append("ro.config.low_ram=true")
     except Exception as e:
         logging.info(f"Can´t be possible detect if your system has a Low Memory RAM: {e}")
-    
+
     # now append/override with values in [properties] section of waydroid.cfg
     cfg = tools.config.load(args)
     for k, v in cfg["properties"].items():
         for idx, elem in enumerate(props):
-            if (k+"=") in elem:
+            if (k + "=") in elem:
                 props.pop(idx)
-        props.append(k+"="+v)
+        props.append(k + "=" + v)
 
     with open(args.work + "/waydroid_base.prop", "w") as f:
         f.writelines(prop + "\n" for prop in props)
-    
+
+
 def setup_host_perms(args):
     if not os.path.exists(tools.config.defaults["host_perms"]):
         os.mkdir(tools.config.defaults["host_perms"])
@@ -449,23 +462,20 @@ def setup_host_perms(args):
 
     sku = tools.helpers.props.host_get(args, "ro.boot.product.hardware.sku")
     copy_list = []
-    copy_list.extend(
-        glob.glob("/vendor/etc/permissions/android.hardware.nfc.*"))
+    copy_list.extend(glob.glob("/vendor/etc/permissions/android.hardware.nfc.*"))
     if os.path.exists("/vendor/etc/permissions/android.hardware.consumerir.xml"):
         copy_list.append("/vendor/etc/permissions/android.hardware.consumerir.xml")
-    copy_list.extend(
-        glob.glob("/odm/etc/permissions/android.hardware.nfc.*"))
+    copy_list.extend(glob.glob("/odm/etc/permissions/android.hardware.nfc.*"))
     if os.path.exists("/odm/etc/permissions/android.hardware.consumerir.xml"):
         copy_list.append("/odm/etc/permissions/android.hardware.consumerir.xml")
     if sku != "":
-        copy_list.extend(
-            glob.glob("/odm/etc/permissions/sku_{}/android.hardware.nfc.*".format(sku)))
+        copy_list.extend(glob.glob("/odm/etc/permissions/sku_{}/android.hardware.nfc.*".format(sku)))
         if os.path.exists("/odm/etc/permissions/sku_{}/android.hardware.consumerir.xml".format(sku)):
-            copy_list.append(
-                "/odm/etc/permissions/sku_{}/android.hardware.consumerir.xml".format(sku))
+            copy_list.append("/odm/etc/permissions/sku_{}/android.hardware.consumerir.xml".format(sku))
 
     for filename in copy_list:
         shutil.copy(filename, tools.config.defaults["host_perms"])
+
 
 def status(args):
     command = ["lxc-info", "-P", tools.config.defaults["lxc"], "-n", "waydroid", "-sH"]
@@ -475,40 +485,42 @@ def status(args):
         logging.info("Couldn't get LXC status. Assuming STOPPED.")
         return "STOPPED"
 
+
 def wait_for_running(args):
     lxc_status = status(args)
     timeout = 10
     while lxc_status != "RUNNING" and timeout > 0:
         lxc_status = status(args)
-        logging.info(
-            "waiting {} seconds for container to start...".format(timeout))
+        logging.info("waiting {} seconds for container to start...".format(timeout))
         timeout = timeout - 1
         time.sleep(1)
     if lxc_status != "RUNNING":
         raise OSError("container failed to start")
 
+
 def start(args):
-    command = ["lxc-start", "-P", tools.config.defaults["lxc"],
-               "-F", "-n", "waydroid", "--", "/init"]
+    command = ["lxc-start", "-P", tools.config.defaults["lxc"], "-F", "-n", "waydroid", "--", "/init"]
     tools.helpers.run.user(args, command, output="background")
     wait_for_running(args)
     # Workaround lxc-start changing stdout/stderr permissions to 700
     with suppress(OSError):
         os.chmod(args.log, 0o666)
 
+
 def stop(args):
-    command = ["lxc-stop", "-P",
-               tools.config.defaults["lxc"], "-n", "waydroid", "-k"]
+    command = ["lxc-stop", "-P", tools.config.defaults["lxc"], "-n", "waydroid", "-k"]
     tools.helpers.run.user(args, command)
+
 
 def freeze(args):
     command = ["lxc-freeze", "-P", tools.config.defaults["lxc"], "-n", "waydroid"]
     tools.helpers.run.user(args, command)
 
+
 def unfreeze(args):
-    command = ["lxc-unfreeze", "-P",
-               tools.config.defaults["lxc"], "-n", "waydroid"]
+    command = ["lxc-unfreeze", "-P", tools.config.defaults["lxc"], "-n", "waydroid"]
     tools.helpers.run.user(args, command)
+
 
 ANDROID_ENV = {
     "PATH": "/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin",
@@ -519,26 +531,36 @@ ANDROID_ENV = {
     "ANDROID_I18N_ROOT": "/apex/com.android.i18n",
     "ANDROID_TZDATA_ROOT": "/apex/com.android.tzdata",
     "ANDROID_RUNTIME_ROOT": "/apex/com.android.runtime",
-    "BOOTCLASSPATH": "/apex/com.android.art/javalib/core-oj.jar:/apex/com.android.art/javalib/core-libart.jar:/apex/com.android.art/javalib/core-icu4j.jar:/apex/com.android.art/javalib/okhttp.jar:/apex/com.android.art/javalib/bouncycastle.jar:/apex/com.android.art/javalib/apache-xml.jar:/system/framework/framework.jar:/system/framework/ext.jar:/system/framework/telephony-common.jar:/system/framework/voip-common.jar:/system/framework/ims-common.jar:/system/framework/framework-atb-backward-compatibility.jar:/apex/com.android.conscrypt/javalib/conscrypt.jar:/apex/com.android.media/javalib/updatable-media.jar:/apex/com.android.mediaprovider/javalib/framework-mediaprovider.jar:/apex/com.android.os.statsd/javalib/framework-statsd.jar:/apex/com.android.permission/javalib/framework-permission.jar:/apex/com.android.sdkext/javalib/framework-sdkextensions.jar:/apex/com.android.wifi/javalib/framework-wifi.jar:/apex/com.android.tethering/javalib/framework-tethering.jar"
+    "BOOTCLASSPATH": "/apex/com.android.art/javalib/core-oj.jar:/apex/com.android.art/javalib/core-libart.jar:/apex/com.android.art/javalib/core-icu4j.jar:/apex/com.android.art/javalib/okhttp.jar:/apex/com.android.art/javalib/bouncycastle.jar:/apex/com.android.art/javalib/apache-xml.jar:/system/framework/framework.jar:/system/framework/ext.jar:/system/framework/telephony-common.jar:/system/framework/voip-common.jar:/system/framework/ims-common.jar:/system/framework/framework-atb-backward-compatibility.jar:/apex/com.android.conscrypt/javalib/conscrypt.jar:/apex/com.android.media/javalib/updatable-media.jar:/apex/com.android.mediaprovider/javalib/framework-mediaprovider.jar:/apex/com.android.os.statsd/javalib/framework-statsd.jar:/apex/com.android.permission/javalib/framework-permission.jar:/apex/com.android.sdkext/javalib/framework-sdkextensions.jar:/apex/com.android.wifi/javalib/framework-wifi.jar:/apex/com.android.tethering/javalib/framework-tethering.jar",
 }
+
 
 def android_env_attach_options(args):
     local_env = ANDROID_ENV.copy()
     # Include CLASSPATH env that was generated by Android
-    command = ["lxc-attach", "-P", tools.config.defaults["lxc"],
-               "-n", "waydroid", "--clear-env", "--",
-               "/system/bin/cat" ,"/data/system/environ/classpath"]
+    command = [
+        "lxc-attach",
+        "-P",
+        tools.config.defaults["lxc"],
+        "-n",
+        "waydroid",
+        "--clear-env",
+        "--",
+        "/system/bin/cat",
+        "/data/system/environ/classpath",
+    ]
     allowed = ["CLASSPATH", "SYSTEMSERVER"]
     with suppress(Exception):
         p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         out, _ = p.communicate()
         if p.returncode == 0:
             for line in out.decode().splitlines():
-                _, k, v = line.split(' ', 2)
+                _, k, v = line.split(" ", 2)
                 if any(pattern in k for pattern in allowed):
                     local_env[k] = v
     env = [k + "=" + v for k, v in local_env.items()]
     return [x for var in env for x in ("--set-var", var)]
+
 
 def shell(args):
     state = status(args)
@@ -547,36 +569,35 @@ def shell(args):
     elif state != "RUNNING":
         logging.error("WayDroid container is {}".format(state))
         return
-    command = ["lxc-attach", "-P", tools.config.defaults["lxc"],
-               "-n", "waydroid", "--clear-env"]
+    command = ["lxc-attach", "-P", tools.config.defaults["lxc"], "-n", "waydroid", "--clear-env"]
     command.extend(android_env_attach_options(args))
     if args.uid is not None:
-        command.append("--uid="+str(args.uid))
+        command.append("--uid=" + str(args.uid))
     if args.gid is not None:
-        command.append("--gid="+str(args.gid))
+        command.append("--gid=" + str(args.gid))
     elif args.uid is not None:
-        command.append("--gid="+str(args.uid))
+        command.append("--gid=" + str(args.uid))
     if args.nolsm or args.allcaps or args.nocgroup:
         elevatedprivs = "--elevated-privileges="
         addpipe = False
         if args.nolsm:
             if addpipe:
-                elevatedprivs+="|"
-            elevatedprivs+="LSM"
+                elevatedprivs += "|"
+            elevatedprivs += "LSM"
             addpipe = True
         if args.allcaps:
             if addpipe:
-                elevatedprivs+="|"
-            elevatedprivs+="CAP"
+                elevatedprivs += "|"
+            elevatedprivs += "CAP"
             addpipe = True
         if args.nocgroup:
             if addpipe:
-                elevatedprivs+="|"
-            elevatedprivs+="CGROUP"
+                elevatedprivs += "|"
+            elevatedprivs += "CGROUP"
             addpipe = True
         command.append(elevatedprivs)
     if args.context is not None and not args.nolsm:
-        command.append("--context="+args.context)
+        command.append("--context=" + args.context)
     command.append("--")
     if args.COMMAND:
         command.extend(args.COMMAND)
@@ -585,6 +606,7 @@ def shell(args):
 
     def mock_sigint(signum, frame):
         raise KeyboardInterrupt
+
     signal.signal(signal.SIGTERM, mock_sigint)
     signal.signal(signal.SIGHUP, mock_sigint)
 
@@ -598,6 +620,7 @@ def shell(args):
 
     if state == "FROZEN":
         freeze(args)
+
 
 def logcat(args):
     args.COMMAND = ["/system/bin/logcat"]
